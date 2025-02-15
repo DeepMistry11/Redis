@@ -1,37 +1,45 @@
 import socket  # noqa: F401
 import threading
+import asyncio
 
-def handle_client_connection(connection, address):
-    print(f"New connection from {address}")
+async def handle_client_connection(reader, writer):
+    """Handles a single client connection asynchronously."""
+    addr = writer.get_extra_info('peername')
+    print(f"New connection from: {addr}")
+    
     while True:
-        data = connection.recv(1024).decode()        
-        
+        data = await reader.read(1024) # Non-blocking read
         if not data:
             break
-        print(f"Received from {address}: {data}")
         
-        if "PING" in data:
-            connection.send("PONG\r\n".encode())
-        elif data.strip().startswith("ECHO "):
-            message = data.strip()[5:]
-            connection.sendall(f"${len(message)}\r\n{message}\r\n".encode())
+        message = data.decode().strip()
+        print(f"Received from {addr}: {message}")
+        
+        if message == "PING":
+            writer.write(b"+PONG\r\n")
+        elif message.startswith("ECHO "):
+            response = message[5:] # Extract message after "ECHO "
+            writer.write(f"{response}\r\n".encode())
         else:
-            connection.sendall(b"-ERR unknown command\r\n")
-
-    print(f"Connection closed from {address}\n")
-    connection.close()
+            writer.write(b"-ERR Unknown command\r\n")
+            
+        await writer.drain()
+        
+    print(f"Connection closed from {addr}")
+    writer.close()
+    await writer.wait_closed()
     
 
-def main():
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Server is running on localhost:6379")
+async def main():
+    """Start an asynchronous server."""
+    server = await asyncio.start_server(handle_client_connection, "localhost", 6379)
     
-    # Uncomment this to pass the first stage
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-    while True:
-        connection, address = server_socket.accept() # wait for client
-        threading.Thread(target=handle_client_connection, args=(connection, address), daemon=True).start()
+    addr = server.sockets[0].getsockname()
+    print(f"Server is running on {addr}")
+    
+    async with server:
+        await server.serve_forever() # Keep the server running
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main()) # Run the event loop

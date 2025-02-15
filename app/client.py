@@ -1,12 +1,10 @@
 import socket
 import threading
+import asyncio
 
-def send_ping():
-    """Connects to the server and sends a PING command."""
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect(("localhost", 6379))
-    print("Connected to the server. Type commands (PING, ECHO message, or EXIT to quit).")
-
+async def send_ping():
+    """Send a command to the server asynchronously."""
+    reader, writer = await asyncio.open_connection("localhost", 6379)
     
     while True:
         command = input("> ")
@@ -14,22 +12,23 @@ def send_ping():
             print("Closing connection.")
             break
 
-        client_socket.sendall(f"{command}\r\n".encode()) # Send PING
-                
-        response = client_socket.recv(1024).decode().strip()
-        print(f"Server response: {response}")
-    client_socket.close()
+        print(f"Sending: {command}")
+        writer.write(f"{command}\r\n".encode()) # Send message to server
+        await writer.drain() # Ensure data is sent
+        
+        response = await reader.read(1024) # Non-blocking receive
+        print(f"Server response: {response.decode().strip()}")
     
+    writer.close()
+    await writer.wait_closed() # Close connection
+    
+
+# async def main():
+#     """Run multiple async commands concurrently."""
+#     await asyncio.gather(
+#         send_ping("PING"),
+#         send_ping("ECHO Hello, Async!")
+#     )
 
 if __name__ == "__main__":
-    send_ping()
-    
-
-# client1 = threading.Thread(target = send_ping, args = (1,))
-# client2 = threading.Thread(target = send_ping, args = (2,))
-
-# client1.start()
-# client2.start()
-
-# client1.join()
-# client2.join()
+    asyncio.run(send_ping()) # Run the event loop
