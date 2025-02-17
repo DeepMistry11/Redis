@@ -2,6 +2,39 @@ import socket  # noqa: F401
 import threading
 import asyncio
 
+
+def process_RESP_commands(data):
+    """Process RESP command, and send RESP response."""
+    lines = data.split("\r\n") # lines = ["*3", "$3", "SET", "$3", "key", "$5", "value"]
+    
+    if lines[0].startswith("*"): # RESP Array (e.g., *3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n)
+        num_elements = int(lines[0][1:])
+        command = lines[2].upper() # Extract command (e.g., SET)
+        
+        if command == "PING":
+            return "+PONG\r\n"
+        elif command == "ECHO":
+            return f"${len(lines[4])}\r\n{data[5:]}\r\n" # bulk string response
+        elif command == "SET":
+            key = lines[4]
+            value = lines[6]
+            RESP_STORAGE[key] = value # Store in memory.
+            return "+OK\r\n"
+        elif command == "GET":
+            key = lines[4]
+            value = RESP_STORAGE.get(key, None) 
+            return f"${len(value)}\r\n{value}\r\n" if value else "$-1\r\n"
+        else:
+            return "-ERR unknown command\r\n"
+    elif data.upper() == "PING":
+        return "+PING\r\n"
+    elif data.upper().startswith("ECHO "):
+        message = data[5:]
+        return f"${len(message)}\r\n{message}\r\n"
+    else:
+        return "-ERR unknown command\r\n"
+        
+
 async def handle_client_connection(reader, writer):
     """Handles a single client connection asynchronously."""
     addr = writer.get_extra_info('peername')
@@ -14,14 +47,9 @@ async def handle_client_connection(reader, writer):
         
         message = data.decode().strip()
         print(f"Received from {addr}: {message}")
-        
-        if message == "PING":
-            writer.write(b"+PONG\r\n")
-        elif message.startswith("ECHO "):
-            response = message[5:] # Extract message after "ECHO "
-            writer.write(f"{response}\r\n".encode())
-        else:
-            writer.write(b"-ERR Unknown command\r\n")
+
+        response = process_RESP_commands(message)
+        writer.write(response.encode())
             
         await writer.drain()
         
@@ -39,7 +67,9 @@ async def main():
     
     async with server:
         await server.serve_forever() # Keep the server running
-
+        
+# In-memory storage for SET/GET commands
+RESP_STORAGE = {}
 
 if __name__ == "__main__":
     asyncio.run(main()) # Run the event loop
