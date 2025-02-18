@@ -1,13 +1,22 @@
 import socket  # noqa: F401
 import threading
 import asyncio
+import time
+
+async def expire_key(key, ttl):
+    """Deletes a key after TTL expires."""
+    await asyncio.sleep(ttl)
+    if key in RESP_STORAGE:
+        print(f"Key: {key} expired!")
+        del RESP_STORAGE[key]
+        del EXPIRATION_TIMES[key]
 
 
 def process_RESP_commands(data):
     """Process RESP command, and send RESP response."""
-    lines = data.split("\r\n") # lines = ["*3", "$3", "SET", "$3", "key", "$5", "value"]
+    lines = data.split("\r\n") # lines = ["*3", "$3", "SET", "$3", "key", "$5", "value", "$2", "EX", "$4", "time"]
     
-    if lines[0].startswith("*"): # RESP Array (e.g., *3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n)
+    if lines[0].startswith("*"): # RESP Array (e.g., *3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n$2EX\r\n$4time)
         num_elements = int(lines[0][1:])
         command = lines[2].upper() # Extract command (e.g., SET)
         
@@ -19,10 +28,29 @@ def process_RESP_commands(data):
             key = lines[4]
             value = lines[6]
             RESP_STORAGE[key] = value # Store in memory.
+            if len(lines) > 7:
+                additional_set_command = lines[8]
+                ttl = int(lines[10])
+                if additional_set_command == "EX":
+                    EXPIRATION_TIMES[key] = time.time() + ttl
+                    # Right after we call this function, it waits for TTL 
+                    # seconds without blocking and the executes rest of the 
+                    # expire_key function and deletes the key.
+                    asyncio.create_task(expire_key(key, ttl)) 
+                elif additional_set_command == "PX": # Set TTL in milliseconds.
+                    EXPIRATION_TIMES[key] = (time.time() / 1000) + ttl
+                    asyncio.create_task(expire_key(key, ttl))
             return "+OK\r\n"
         elif command == "GET":
             key = lines[4]
+            
+            if key in EXPIRATION_TIMES and EXPIRATION_TIMES[key] < time.time():
+                del RESP_STORAGE[key]
+                del EXPIRATION_TIMES[key]
+                return "$-1\r\n"
+            
             value = RESP_STORAGE.get(key, None) 
+            
             return f"${len(value)}\r\n{value}\r\n" if value else "$-1\r\n"
         else:
             return "-ERR unknown command\r\n"
@@ -70,6 +98,7 @@ async def main():
         
 # In-memory storage for SET/GET commands
 RESP_STORAGE = {}
+EXPIRATION_TIMES = {}
 
 if __name__ == "__main__":
     asyncio.run(main()) # Run the event loop
