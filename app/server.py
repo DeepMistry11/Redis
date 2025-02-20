@@ -2,6 +2,8 @@ import socket  # noqa: F401
 import threading
 import asyncio
 import time
+import argparse
+
 
 async def expire_key(key, ttl):
     """Deletes a key after TTL expires."""
@@ -52,6 +54,15 @@ def process_RESP_commands(data):
             value = RESP_STORAGE.get(key, None) 
             
             return f"${len(value)}\r\n{value}\r\n" if value else "$-1\r\n"
+        elif command == "CONFIG" and num_elements == 3 and lines[4].upper() == "GET":
+            config_key = lines[6]
+
+            if config_key in SERVER_CONFIG:
+                value = SERVER_CONFIG[config_key]
+                return f"*2\r\n${len(config_key)}\r\n{config_key}\r\n${len(value)}\r\n{value}\r\n"
+
+            return "*0\r\n" 
+            
         else:
             return "-ERR unknown command\r\n"
     elif data.upper() == "PING":
@@ -85,9 +96,40 @@ async def handle_client_connection(reader, writer):
     writer.close()
     await writer.wait_closed()
     
+    
+def parse_args(args):
+    global SERVER_CONFIG
+    
+    args_dict = vars(args)
+    
+    i = 0
+    for key, value in args_dict.items():
+        if value is not None:
+            SERVER_CONFIG[key] = value
+        # if args[key] == "--dir" and i+1 < len(args):
+        #     SERVER_CONFIG["dir"] = args[i+1]
+        #     i += 1
+        # elif args[i] == "--dbfilename" and i+1 < len(args):
+        #     SERVER_CONFIG["dbfilename"] = args[i+1]    
+        #     i += 1
+        # i += 1
+        
+    
 
 async def main():
     """Start an asynchronous server."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dir', type=str)
+    parser.add_argument('--dbfilename', type=str)
+    args = parser.parse_args()
+    # print
+    # global dir, dbfilename
+    # if args.dir:
+    #     SERVER_CONFIG[dir] = args.dir
+    # if args.dbfilename:
+    #     SERVER_CONFIG[dbfilename] = args.dbfilename
+    parse_args(args)
+    
     server = await asyncio.start_server(handle_client_connection, "localhost", 6379)
     
     addr = server.sockets[0].getsockname()
@@ -99,6 +141,10 @@ async def main():
 # In-memory storage for SET/GET commands
 RESP_STORAGE = {}
 EXPIRATION_TIMES = {}
+SERVER_CONFIG = {}
 
 if __name__ == "__main__":
-    asyncio.run(main()) # Run the event loop
+    try:
+        asyncio.run(main()) # Run the event loop
+    except KeyboardInterrupt:
+        print(f"Server stopped by user.")
