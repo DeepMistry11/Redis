@@ -3,6 +3,8 @@ import threading
 import asyncio
 import time
 import argparse
+from generate_rdb import generate_RDB
+from storage import RESP_STORAGE, EXPIRATION_TIMES
 
 
 async def expire_key(key, ttl):
@@ -62,6 +64,10 @@ def process_RESP_commands(data):
                 return f"*2\r\n${len(config_key)}\r\n{config_key}\r\n${len(value)}\r\n{value}\r\n"
 
             return "*0\r\n" 
+        elif command == "SAVE":
+            # To run SAVE I/O operation in non-blocking Asynchronous manner.
+            asyncio.create_task(asyncio.to_thread(generate_RDB, SERVER_CONFIG))
+            return "+OK\r\n"
             
         else:
             return "-ERR unknown command\r\n"
@@ -139,8 +145,8 @@ async def main():
         await server.serve_forever() # Keep the server running
         
 # In-memory storage for SET/GET commands
-RESP_STORAGE = {}
-EXPIRATION_TIMES = {}
+# RESP_STORAGE = {}
+# EXPIRATION_TIMES = {}
 SERVER_CONFIG = {}
 
 if __name__ == "__main__":
